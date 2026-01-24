@@ -56,7 +56,12 @@ async def shutdown_db_client():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://data-mind-theta.vercel.app",
+        "https://data-mind-six.vercel.app",
+        "https://dynamic-ai-assistant-bd.onrender.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
