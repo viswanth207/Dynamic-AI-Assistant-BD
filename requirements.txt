@@ -28,6 +28,7 @@ fastapi-cors==0.0.6
 # Validation
 pydantic==2.12.5
 pydantic-settings==2.12.0
+email-validator==2.1.0.post1
 
 # MongoDB
 motor==3.3.2
