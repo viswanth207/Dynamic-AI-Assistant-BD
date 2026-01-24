@@ -1,0 +1,39 @@
+# Core FastAPI dependencies
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+sse-starlette==1.8.2
+
+# AI/ML dependencies
+langchain==0.1.6
+langchain-community==0.0.19
+langchain-groq==0.0.1
+groq==0.4.2
+faiss-cpu==1.7.4
+sentence-transformers==2.3.1
+
+# Data processing
+pandas==2.2.0
+numpy==1.26.3
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# Environment management
+python-dotenv==1.0.1
+
+# CORS support
+fastapi-cors==0.0.6
+
+# Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# MongoDB
+motor==3.3.2
+pymongo==4.6.1
+
+# Authentication
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+bcrypt==4.1.2
