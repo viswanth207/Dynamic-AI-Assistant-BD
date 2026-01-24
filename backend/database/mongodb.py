@@ -7,7 +7,7 @@ import logging
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://viswanthchirumamilla:7HV63Eswef8h1PXF@cluster0.v0rkh.mongodb.net/?appName=Cluster0")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "dynamic_assistant_db")
 
 # Async MongoDB client for FastAPI
@@ -27,7 +27,14 @@ async def connect_to_mongo():
         
         # Test connection
         await async_client.admin.command('ping')
-        logger.info(f"Connected to MongoDB: {DATABASE_NAME}")
+        
+        # Mask password for logging
+        masked_url = MONGODB_URL
+        if "@" in MONGODB_URL:
+            part1 = MONGODB_URL.split("@")[1]
+            masked_url = f"mongodb+srv://****@{part1}"
+            
+        logger.info(f"Connected to MongoDB: {DATABASE_NAME} at {masked_url}")
         
         # Create indexes
         await create_indexes()
