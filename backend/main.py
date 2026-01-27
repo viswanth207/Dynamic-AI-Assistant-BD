@@ -58,7 +58,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://dynamic-ai-assistant-bd.onrender.com"
+        "http://localhost:3000",
+        "https://dynamic-ai-assistant-bd.onrender.com",
+        "https://vercel.app"
     ],
     allow_origin_regex="https://.*\\.vercel\\.app",
     allow_credentials=True,
