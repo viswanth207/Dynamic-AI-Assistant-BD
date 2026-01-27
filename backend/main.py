@@ -60,7 +60,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
         "http://3.80.23.96:8000",
-        "https://classified-author-caroline-martin.trycloudflare.com",
+        "https://lion-resolutions-shopzilla-forgotten.trycloudflare.com",
         "https://dynamic-ai-assistant-bd.onrender.com",
         "https://vercel.app",
         "https://data-mind-theta.vercel.app"
