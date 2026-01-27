@@ -89,8 +89,8 @@ async def login(user_credentials: UserLogin, response: Response):
             value=access_token,
             httponly=True,
             max_age=30 * 24 * 60 * 60,  # 30 days
-            secure=False,  # Set to True in production with HTTPS
-            samesite="lax"
+            secure=True,  # Required for SameSite=None
+            samesite="none"  # Required for cross-origin requests
         )
         
         logger.info(f"User logged in: {user.email}")
