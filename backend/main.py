@@ -109,13 +109,15 @@ if os.path.exists(FRONTEND_BUILD_DIR):
     @app.get("/")
     async def serve_frontend():
         return FileResponse(os.path.join(FRONTEND_BUILD_DIR, "index.html"))
-else:
+elif os.path.exists(FRONTEND_DEV_DIR):
     # Development: Serve old HTML files
     app.mount("/static", StaticFiles(directory=FRONTEND_DEV_DIR), name="static")
     
     @app.get("/")
     async def serve_frontend():
         return FileResponse(os.path.join(FRONTEND_DEV_DIR, "index.html"))
+else:
+    logger.warning("Frontend directory not found. Skipping static file serving. This is expected in API-only mode (e.g. AWS Backend + Vercel Frontend).")
 
 
 @app.get("/health", response_model=HealthResponse)
