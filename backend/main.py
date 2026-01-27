@@ -60,6 +60,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
         "http://3.80.23.96:8000",
+        "https://7ba3a0ff89c0.ngrok-free.app",
         "https://dynamic-ai-assistant-bd.onrender.com",
         "https://vercel.app"
     ],
