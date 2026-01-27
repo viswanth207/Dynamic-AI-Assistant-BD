@@ -62,7 +62,8 @@ app.add_middleware(
         "http://3.80.23.96:8000",
         "https://7ba3a0ff89c0.ngrok-free.app",
         "https://dynamic-ai-assistant-bd.onrender.com",
-        "https://vercel.app"
+        "https://vercel.app",
+        "https://data-mind-theta.vercel.app"
     ],
     allow_origin_regex="https://.*\\.vercel\\.app",
     allow_credentials=True,
