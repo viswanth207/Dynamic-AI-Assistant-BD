@@ -60,7 +60,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
         "http://3.80.23.96:8000",
-        "https://protocols-minister-petition-wide.trycloudflare.com",
+        "https://rag.neuraltrixai.app",
         "https://dynamic-ai-assistant-bd.onrender.com",
         "https://vercel.app",
         "https://data-mind-theta.vercel.app"
