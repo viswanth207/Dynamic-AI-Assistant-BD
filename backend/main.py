@@ -151,6 +151,7 @@ async def create_assistant(
         assistant_id = str(uuid.uuid4())
         
         documents = []
+        file_path = None
         
         if data_source_type == "url":
             if not data_source_url:
