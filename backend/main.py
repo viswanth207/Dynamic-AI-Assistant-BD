@@ -288,7 +288,7 @@ async def create_assistant(
             name=name,
             data_source_type=data_source_type,
             documents_loaded=len(documents),
-            created_at=assistant_config["created_at"],
+            created_at=assistant_data["created_at"],
             message="Assistant created successfully! You can now start chatting."
         )
     
