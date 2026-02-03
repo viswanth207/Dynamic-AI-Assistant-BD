@@ -128,60 +128,41 @@ async def health_check():
     )
 
 
-@app.post("/api/assistants/create", response_model=AssistantCreateResponse)
-async def create_assistant(
-    name: str = Form(...),
-    data_source_type: str = Form(...),
-    data_source_url: Optional[str] = Form(None),
-    custom_instructions: str = Form(
-        "You are a helpful AI assistant. Analyze the data, identify patterns, and answer questions. You can make predictions based on data patterns when asked about hypothetical scenarios."
-    ),
-    enable_statistics: bool = Form(False),
-    enable_alerts: bool = Form(False),
-    enable_recommendations: bool = Form(False),
-    file: Optional[UploadFile] = File(None),
-    current_user: UserInDB = Depends(get_current_user)
+async def process_assistant_background(
+    assistant_id: str,
+    name: str,
+    user_id: str,
+    file_bytes: Optional[bytes],
+    filename: str,
+    data_source_type: str,
+    data_source_url: Optional[str],
+    custom_instructions: str,
+    enable_statistics: bool,
+    enable_alerts: bool,
+    enable_recommendations: bool
 ):
     try:
-        logger.info(f"Creating assistant: {name} for user: {current_user.email}")
-        
-        if data_source_type not in ["csv", "json", "url"]:
-            raise HTTPException(400, "Invalid data_source_type")
-        
-        assistant_id = str(uuid.uuid4())
-        
+        logger.info(f"Background processing started for assistant: {assistant_id} for user: {user_id}")
         documents = []
         file_path = None
+        user_upload_dir = os.path.join(UPLOAD_DIR, user_id)
+        os.makedirs(user_upload_dir, exist_ok=True)
         
+        # Load Data
         if data_source_type == "url":
             if not data_source_url:
-                raise HTTPException(400, "data_source_url required for URL type")
-            
+                logger.error(f"Background processing failed for {assistant_id}: data_source_url required for URL type")
+                return
             logger.info(f"Loading data from URL: {data_source_url}")
             documents = DataLoader.load_from_url(data_source_url)
-        
         else:
-            if not file:
-                raise HTTPException(400, "File required for CSV/JSON type")
+            if not file_bytes:
+                logger.error(f"Background processing failed for {assistant_id}: File bytes required for CSV/JSON type")
+                return
             
-            file_size = 0
-            content = await file.read()
-            file_size = len(content) / (1024 * 1024)
-            
-            if file_size > MAX_FILE_SIZE_MB:
-                raise HTTPException(
-                    400, 
-                    f"File size exceeds {MAX_FILE_SIZE_MB}MB limit"
-                )
-            
-            # Create user-specific upload directory
-            user_upload_dir = os.path.join(UPLOAD_DIR, current_user.id)
-            os.makedirs(user_upload_dir, exist_ok=True)
-            
-            file_path = os.path.join(user_upload_dir, f"{assistant_id}_{file.filename}")
+            file_path = os.path.join(user_upload_dir, f"{assistant_id}_{filename}")
             with open(file_path, "wb") as f:
-                f.write(content)
-            
+                f.write(file_bytes)
             logger.info(f"File saved: {file_path}")
             
             if data_source_type == "csv":
@@ -190,48 +171,50 @@ async def create_assistant(
                 documents = DataLoader.load_from_json(file_path)
         
         if not documents:
-            raise HTTPException(400, "No data could be loaded from the source")
-        
-        logger.info(f"Loaded {len(documents)} documents")
-        
-        # Extract attributes from metadata
+            logger.error(f"Background processing failed for {assistant_id}: No documents loaded")
+            # Ideally update status in DB to 'failed'
+            return
+
+        logger.info(f"Loaded {len(documents)} documents for assistant {assistant_id}")
+
+        # Extract Attributes & Questions
         attributes = []
         if documents:
-            # Get keys from the first few documents' metadata, excluding internal keys
             exclude_keys = {'source', 'row_number', 'item_number', 'chunk', 'type', 'title', 'heading'}
             all_keys = set()
             for doc in documents[:5]:
                 all_keys.update(doc.metadata.keys())
             attributes = sorted([k for k in all_keys if k not in exclude_keys])
 
-        # Generate sample questions based on attributes
         sample_questions = []
         if attributes:
-            if data_source_type in ["csv", "json"]:
-                sample_questions = [
-                    f"What can you tell me about the {attributes[0]} in this data?",
-                    f"Which item has the highest {attributes[1 if len(attributes) > 1 else 0]}?",
-                    f"Compare the different values of {attributes[0]}.",
-                    f"Give me a summary of the dataset based on {', '.join(attributes[:2])}."
-                ]
-            else: # URL
-                sample_questions = [
-                    "What is the main topic of this page?",
-                    "Can you summarize the key points?",
-                    "What are the specific details mentioned about this topic?",
-                    "Who are the main people or entities mentioned?"
-                ]
+             if data_source_type in ["csv", "json"]:
+                 sample_questions = [
+                     f"What can you tell me about the {attributes[0]} in this data?",
+                     f"Which item has the highest {attributes[1 if len(attributes) > 1 else 0]}?",
+                     f"Compare the different values of {attributes[0]}.",
+                     f"Give me a summary of the dataset based on {', '.join(attributes[:2])}."
+                 ]
+             else: # URL
+                 sample_questions = [
+                     "What is the main topic of this page?",
+                     "Can you summarize the key points?",
+                     "What are the specific details mentioned about this topic?",
+                     "Who are the main people or entities mentioned?"
+                 ]
         else:
-            sample_questions = [
+             sample_questions = [
                 "Summarize the provided data.",
                 "What are the key insights from this dataset?",
                 "Are there any notable patterns in the data?",
                 "What's the most interesting thing you found?"
             ]
 
-        # Generate Graph Analytics Data
+        # Generate Graph Data
         graph_data = DataLoader.generate_graph_insights(file_path, data_source_type)
 
+        # Create Assistant Config (Vector Store + System Instructions)
+        # This is the slow part
         assistant_config = assistant_engine.create_assistant(
             assistant_id=assistant_id,
             name=name,
@@ -242,9 +225,9 @@ async def create_assistant(
             enable_recommendations=enable_recommendations
         )
         
-        # Save to MongoDB
+        # Update DB with complete data
         assistant_data = {
-            "user_id": current_user.id,
+            "user_id": user_id,
             "assistant_id": assistant_id,
             "name": name,
             "data_source_type": data_source_type,
@@ -257,29 +240,86 @@ async def create_assistant(
             "vector_store_path": user_upload_dir if data_source_type != "url" else "",
             "attributes": attributes,
             "sample_questions": sample_questions,
-            "graph_data": graph_data
+            "graph_data": graph_data,
+            "status": "active", # Mark as ready
+            "created_at": datetime.utcnow()
         }
         await crud.create_assistant(assistant_data)
-        
-        # Keep in memory for current session
         assistants_store[assistant_id] = assistant_config
+        logger.info(f"Background processing complete for {assistant_id}")
+
+    except Exception as e:
+        logger.error(f"Background processing CRASHED for {assistant_id}: {str(e)}")
+        # Optionally update assistant status in DB to 'failed' here
+
+
+@app.post("/api/assistants/create", response_model=AssistantCreateResponse)
+async def create_assistant_endpoint(
+    background_tasks: BackgroundTasks,
+    name: str = Form(...),
+    data_source_type: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    data_source_url: Optional[str] = Form(None),
+    custom_instructions: str = Form(
+        "You are a helpful AI assistant. Analyze the data, identify patterns, and answer questions. You can make predictions based on data patterns when asked about hypothetical scenarios."
+    ),
+    enable_statistics: bool = Form(False),
+    enable_alerts: bool = Form(False),
+    enable_recommendations: bool = Form(False),
+    current_user: UserInDB = Depends(get_current_user)
+):
+    try:
+        logger.info(f"Received assistant creation request for user: {current_user.email}, name: {name}")
         
-        logger.info(f"Assistant created: {assistant_id}")
+        if data_source_type not in ["csv", "json", "url"]:
+            raise HTTPException(400, "Invalid data_source_type")
+        
+        assistant_id = str(uuid.uuid4())
+        
+        file_bytes = None
+        filename = ""
+        
+        if data_source_type != "url":
+            if not file:
+                raise HTTPException(400, "File required for CSV/JSON type")
+            
+            file_bytes = await file.read()
+            filename = file.filename
+            
+            if len(file_bytes) > MAX_FILE_SIZE_MB * 1024 * 1024:
+                raise HTTPException(
+                    400, 
+                    f"File size exceeds {MAX_FILE_SIZE_MB}MB limit"
+                )
+        elif not data_source_url:
+            raise HTTPException(400, "data_source_url required for URL type")
+
+        # Start Background Processing
+        background_tasks.add_task(
+            process_assistant_background,
+            assistant_id, name, current_user.id, file_bytes, filename,
+            data_source_type, data_source_url, custom_instructions,
+            enable_statistics, enable_alerts, enable_recommendations
+        )
+        
+        # Optionally, create a pending entry in DB immediately if you want to show it in UI
+        # with a 'pending' status before background task completes.
+        # For now, we return success immediately. The assistant will appear in "My Assistants" when processing finishes.
         
         return AssistantCreateResponse(
             assistant_id=assistant_id,
             name=name,
             data_source_type=data_source_type,
-            documents_loaded=len(documents),
-            created_at=assistant_config["created_at"],
-            message="Assistant created successfully! You can now start chatting."
+            documents_loaded=0, # Unknown yet, as processing is in background
+            created_at=datetime.utcnow().isoformat(),
+            message="Assistant creation started! It will appear in your list shortly."
         )
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating assistant: {str(e)}")
-        raise HTTPException(500, f"Failed to create assistant: {str(e)}")
+        logger.error(f"Error starting assistant creation: {str(e)}")
+        raise HTTPException(500, f"Failed to start creation: {str(e)}")
 
 
 @app.post("/api/chat", response_model=ChatResponse)
