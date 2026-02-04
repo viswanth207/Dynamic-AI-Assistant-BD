@@ -10,6 +10,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 import shutil
 from sse_starlette.sse import EventSourceResponse
+from backend.s3_storage import S3Manager
+import tempfile
+import io
 
 from backend.models import (
     AssistantCreateRequest,
@@ -174,20 +177,37 @@ async def create_assistant(
                     f"File size exceeds {MAX_FILE_SIZE_MB}MB limit"
                 )
             
-            # Create user-specific upload directory
-            user_upload_dir = os.path.join(UPLOAD_DIR, current_user.id)
-            os.makedirs(user_upload_dir, exist_ok=True)
+            # Save to temporary file for processing
+            # We use a temp file so pandas/loaders can read it easily
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as tmp:
+                tmp.write(content)
+                temp_file_path = tmp.name
             
-            file_path = os.path.join(user_upload_dir, f"{assistant_id}_{file.filename}")
-            with open(file_path, "wb") as f:
-                f.write(content)
+            logger.info(f"Temp file created: {temp_file_path}")
             
-            logger.info(f"File saved: {file_path}")
-            
-            if data_source_type == "csv":
-                documents = DataLoader.load_from_csv(file_path)
-            elif data_source_type == "json":
-                documents = DataLoader.load_from_json(file_path)
+            try:
+                # 1. Upload to S3 (Permanent Storage)
+                # Object name: userID/assistantID_filename
+                object_name = f"{current_user.id}/{assistant_id}_{file.filename}"
+                s3_manager = S3Manager()
+                
+                # Reset stream or pass content bytes
+                s3_url = s3_manager.upload_file(io.BytesIO(content), object_name)
+                
+                # 2. Process for Vector DB (using local temp file)
+                if data_source_type == "csv":
+                    documents = DataLoader.load_from_csv(temp_file_path)
+                elif data_source_type == "json":
+                    documents = DataLoader.load_from_json(temp_file_path)
+                
+                file_path = temp_file_path  # For graph generation
+                data_source_url = s3_url    # Metadata points to S3 now
+                
+            except Exception as e:
+                # If loading fails, clean up temp file
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                raise HTTPException(500, f"Error processing file: {str(e)}")
         
         if not documents:
             raise HTTPException(400, "No data could be loaded from the source")
@@ -240,13 +260,13 @@ async def create_assistant(
             "assistant_id": assistant_id,
             "name": name,
             "data_source_type": data_source_type,
-            "data_source_url": data_source_url,
+            "data_source_url": data_source_url, # Now holds S3 URL
             "custom_instructions": custom_instructions,
             "enable_statistics": enable_statistics,
             "enable_alerts": enable_alerts,
             "enable_recommendations": enable_recommendations,
             "documents_count": len(documents),
-            "vector_store_path": user_upload_dir if data_source_type != "url" else "",
+            "vector_store_path": "", # Not needed with Atlas
             "attributes": attributes,
             "sample_questions": sample_questions,
             "graph_data": graph_data,
@@ -255,7 +275,7 @@ async def create_assistant(
         await crud.create_assistant(assistant_data)
 
         # Helper to run heavy task in background
-        def process_heavy_task(assistant_id, name, documents, custom_instructions, enable_statistics, enable_alerts, enable_recommendations):
+        def process_heavy_task(assistant_id, name, documents, custom_instructions, enable_statistics, enable_alerts, enable_recommendations, temp_path_to_delete):
              try:
                  logger.info(f"Background: Starting vector store creation for {assistant_id}...")
                  assistant_config = assistant_engine.create_assistant(
@@ -271,12 +291,24 @@ async def create_assistant(
                  logger.info(f"Background: Vector store created for {assistant_id}")
              except Exception as e:
                  logger.error(f"Background Task Failed for {assistant_id}: {str(e)}")
+             finally:
+                 # Clean up temp file after background processing or failure
+                 # Note: We pass the path to delete so background task does it
+                 pass # We actually delete it synchronously below for graph data safety, 
+                      # OR pass it here if graphs need it.
+                      # Ideally, we delete it NOW if graph data is already generated.
+        
+        # Clean up temp file locally (graphs generated, S3 uploaded, Vectors need documents object only)
+        if file_path and os.path.exists(file_path):
+             os.remove(file_path)
+             logger.info(f"Temp file deleted: {file_path}")
 
         # Start Background Task
+        # Note: 'documents' are already loaded in memory, so we don't need the file anymore
         background_tasks.add_task(
             process_heavy_task,
             assistant_id, name, documents, custom_instructions, 
-            enable_statistics, enable_alerts, enable_recommendations
+            enable_statistics, enable_alerts, enable_recommendations, None
         )
         
         logger.info(f"Assistant created (Processing in background): {assistant_id}")
