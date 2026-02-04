@@ -6,6 +6,8 @@ sse-starlette==1.8.2
 
 # AI/ML dependencies
 langchain==1.2.7
+langchain-huggingface
+langchain-mongodb
 langchain-community==0.4.1
 langchain-groq==1.1.1
 groq==0.37.1
