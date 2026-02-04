@@ -1,7 +1,8 @@
 from typing import List, Optional
 from langchain_core.documents import Document
-from langchain_community.vectorstores import FAISS
+from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from pymongo import MongoClient
 import logging
 import os
 
@@ -19,28 +20,41 @@ class VectorStoreManager:
             torch.set_num_threads(1)
         except ImportError:
             pass
-        
+            
         self.embeddings = HuggingFaceEmbeddings(
             model_name="all-MiniLM-L6-v2",
             model_kwargs={'device': 'cpu'},
             encode_kwargs={'normalize_embeddings': True}
         )
         
-        logger.info("Embeddings initialized successfully")
+        # Initialize MongoDB Client for Vector Search
+        self.mongo_uri = os.getenv("MONGODB_URL")
+        self.db_name = "dynamic_assistant_db"
+        self.collection_name = "embeddings"
+        self.client = MongoClient(self.mongo_uri)
+        self.collection = self.client[self.db_name][self.collection_name]
+        
+        logger.info("Vector Store Manager initialized with MongoDB Atlas")
     
-    def create_vector_store(self, documents: List[Document]) -> FAISS:
+    def create_vector_store(self, documents: List[Document]) -> MongoDBAtlasVectorSearch:
         if not documents:
             raise ValueError("Cannot create vector store with empty documents")
         
         try:
-            logger.info(f"Creating vector store with {len(documents)} documents")
+            logger.info(f"Adding {len(documents)} documents to MongoDB Atlas Vector Store...")
             
-            vector_store = FAISS.from_documents(
+            # MongoDB Atlas Vector Search handles batching internally, 
+            # but we can do it explicitly if needed. 
+            # For now, we trust the library but we might need to batch if 10k explodes.
+            
+            vector_store = MongoDBAtlasVectorSearch.from_documents(
                 documents=documents,
-                embedding=self.embeddings
+                embedding=self.embeddings,
+                collection=self.collection,
+                index_name="vector_index" 
             )
             
-            logger.info("Vector store created successfully")
+            logger.info("Documents added to Vector Store successfully")
             return vector_store
             
         except Exception as e:
@@ -49,11 +63,16 @@ class VectorStoreManager:
     
     def similarity_search(
         self, 
-        vector_store: FAISS, 
+        vector_store: MongoDBAtlasVectorSearch,  # Type hint updated
         query: str, 
         k: int = 4
     ) -> List[Document]:
         try:
+            # Note: vector_store object might be reconstructed, 
+            # so we ensure we look at the right place.
+            # Actually, we don't need to pass 'vector_store' object around as much 
+            # because the state is in DB. But to keep API consistent for now:
+            
             logger.info(f"Performing similarity search for: {query[:50]}...")
             
             results = vector_store.similarity_search(
@@ -70,7 +89,7 @@ class VectorStoreManager:
     
     def similarity_search_with_score(
         self, 
-        vector_store: FAISS, 
+        vector_store: MongoDBAtlasVectorSearch, 
         query: str, 
         k: int = 4
     ) -> List[tuple[Document, float]]:
@@ -88,25 +107,14 @@ class VectorStoreManager:
         except Exception as e:
             logger.error(f"Error during similarity search: {str(e)}")
             return []
-    
-    def save_vector_store(self, vector_store: FAISS, path: str) -> None:
-        try:
-            os.makedirs(path, exist_ok=True)
-            vector_store.save_local(path)
-            logger.info(f"Vector store saved to {path}")
-        except Exception as e:
-            logger.error(f"Error saving vector store: {str(e)}")
-            raise
-    
-    def load_vector_store(self, path: str) -> FAISS:
-        try:
-            vector_store = FAISS.load_local(
-                path, 
-                self.embeddings,
-                allow_dangerous_deserialization=True
-            )
-            logger.info(f"Vector store loaded from {path}")
-            return vector_store
-        except Exception as e:
-            logger.error(f"Error loading vector store: {str(e)}")
-            raise
+
+    # No longer needed: save_vector_store, load_vector_store 
+    # (Because DB is the storage)
+
+    def get_vector_store(self):
+        """Helper to get an existing vector store object connected to DB"""
+        return MongoDBAtlasVectorSearch(
+            collection=self.collection,
+            embedding=self.embeddings,
+            index_name="vector_index"
+        )
