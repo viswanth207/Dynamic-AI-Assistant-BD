@@ -93,7 +93,8 @@ class AssistantEngine:
             )
             
             if not relevant_docs:
-                yield "I don't have enough information to answer that question based on the provided data."
+                import json
+                yield json.dumps({"type": "content", "data": "I don't have enough information to answer that question based on the provided data."}) + "\n"
                 return
 
             # 2. Build Prompt
