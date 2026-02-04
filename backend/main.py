@@ -214,6 +214,12 @@ async def create_assistant(
         
         logger.info(f"Loaded {len(documents)} documents")
         
+        # Inject Contextual Metadata (CRITICAL for multi-tenant isolation)
+        for doc in documents:
+            doc.metadata["assistant_id"] = assistant_id
+            doc.metadata["user_id"] = current_user.id
+
+        
         # Extract attributes from metadata
         attributes = []
         if documents:
