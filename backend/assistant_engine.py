@@ -87,9 +87,10 @@ class AssistantEngine:
             k_docs = 30 if is_comparison else 8
             
             # Filter by assistant_id to prevent data leakage between assistants
+            # Filter by assistant_id to prevent data leakage between assistants
             assistant_id = assistant_config.get("assistant_id")
-            # LangChain MongoDB stores metadata inside a 'metadata' field usually.
-            search_filter = {"metadata.assistant_id": {"$eq": assistant_id}} if assistant_id else None
+            # Metadata is stored at ROOT level in MongoDBAtlasVectorSearch
+            search_filter = {"assistant_id": {"$eq": assistant_id}} if assistant_id else None
             
             relevant_docs = self.vector_store_manager.similarity_search(
                 vector_store=vector_store,
@@ -159,7 +160,7 @@ class AssistantEngine:
             
             # Filter by assistant_id to prevent data leakage
             assistant_id = assistant_config.get("assistant_id")
-            search_filter = {"metadata.assistant_id": {"$eq": assistant_id}} if assistant_id else None
+            search_filter = {"assistant_id": {"$eq": assistant_id}} if assistant_id else None
             
             relevant_docs = self.vector_store_manager.similarity_search(
                 vector_store=vector_store,
