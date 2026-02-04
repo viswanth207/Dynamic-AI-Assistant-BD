@@ -13,9 +13,12 @@ class VectorStoreManager:
     def __init__(self):
         logger.info("Initializing HuggingFace embeddings...")
         
-import torch
-        # Limit CPU threads to prevent server freeze
-        torch.set_num_threads(1)
+        # Limit CPU threads to prevent server freeze on single-core instances
+        try:
+            import torch
+            torch.set_num_threads(1)
+        except ImportError:
+            pass
         
         self.embeddings = HuggingFaceEmbeddings(
             model_name="all-MiniLM-L6-v2",
@@ -30,23 +33,12 @@ import torch
             raise ValueError("Cannot create vector store with empty documents")
         
         try:
-            logger.info(f"Creating vector store with {len(documents)} documents (Batch mode)")
+            logger.info(f"Creating vector store with {len(documents)} documents")
             
-            # Process in small batches to keep server responsive
-            batch_size = 500  # Process 500 docs at a time
-            vector_store = None
-            
-            total_batches = (len(documents) + batch_size - 1) // batch_size
-            
-            for i in range(0, len(documents), batch_size):
-                batch = documents[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}/{total_batches}...")
-                
-                if vector_store is None:
-                    vector_store = FAISS.from_documents(batch, self.embeddings)
-                else:
-                    batch_vector_store = FAISS.from_documents(batch, self.embeddings)
-                    vector_store.merge_from(batch_vector_store)
+            vector_store = FAISS.from_documents(
+                documents=documents,
+                embedding=self.embeddings
+            )
             
             logger.info("Vector store created successfully")
             return vector_store
