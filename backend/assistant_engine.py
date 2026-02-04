@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime
 
-from backend.vector_store import VectorStoreManager, FAISS
+from backend.vector_store import VectorStoreManager
 from backend.data_loader import DataLoader
 
 logger = logging.getLogger(__name__)
