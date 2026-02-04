@@ -320,42 +320,13 @@ async def chat_with_assistant(
             load_start = time.time()
             logger.info(f"Loading assistant {request.assistant_id} from database...")
             
-            # Get the user's upload directory
-            user_upload_dir = os.path.join(UPLOAD_DIR, current_user.id)
+            # Since we are using MongoDB Vector Search, we don't need to load files 
+            # and rebuild the index in memory anymore! We just connect to it.
             
-            # Find files associated with this assistant
-            assistant_files = []
-            if os.path.exists(user_upload_dir):
-                for file in os.listdir(user_upload_dir):
-                    if file.startswith(f"{request.assistant_id}_"):
-                        assistant_files.append(os.path.join(user_upload_dir, file))
+            # Get access to the shared vector store (connected to Atlas)
+            vector_store = vector_store_manager.get_vector_store()
             
-            if not assistant_files:
-                raise HTTPException(400, "Assistant files not found. Please recreate the assistant.")
-            
-            # Load documents from all assistant files
-            documents = []
-            for file_path in assistant_files:
-                file_ext = os.path.splitext(file_path)[1].lower()
-                try:
-                    if file_ext == '.csv':
-                        docs = DataLoader.load_from_csv(file_path)
-                    elif file_ext == '.json':
-                        docs = DataLoader.load_from_json(file_path)
-                    else:
-                        logger.warning(f"Unsupported file type: {file_ext}")
-                        continue
-                    documents.extend(docs)
-                except Exception as e:
-                    logger.error(f"Error loading file {file_path}: {str(e)}")
-                    
-            if not documents:
-                raise HTTPException(400, "Failed to load assistant documents.")
-            
-            # Create vector store
-            vector_store = vector_store_manager.create_vector_store(documents)
-            
-            # Build system instructions using assistant engine's method
+            # Build system instructions
             system_instructions = assistant_engine._build_system_instructions(
                 custom_instructions=assistant_db.custom_instructions,
                 enable_statistics=assistant_db.enable_statistics,
@@ -370,7 +341,7 @@ async def chat_with_assistant(
                 "custom_instructions": assistant_db.custom_instructions,
                 "system_instructions": system_instructions,
                 "vector_store": vector_store,
-                "documents_count": len(documents),
+                "documents_count": assistant_db.documents_count,
                 "enable_statistics": assistant_db.enable_statistics,
                 "enable_alerts": assistant_db.enable_alerts,
                 "enable_recommendations": assistant_db.enable_recommendations,
@@ -380,6 +351,7 @@ async def chat_with_assistant(
             assistants_store[request.assistant_id] = assistant_config
             load_time = time.time() - load_start
             logger.info(f"Assistant {request.assistant_id} loaded in {load_time:.2f}s")
+
         else:
             logger.info(f"Using cached assistant {request.assistant_id}")
         
@@ -427,35 +399,11 @@ async def chat_stream(
         if not assistant_db:
             raise HTTPException(404, "Assistant not found or access denied")
             
-        # Load assistant config if not in memory (same logic as regular chat)
+        # Load assistant config if not in memory
         if request.assistant_id not in assistants_store:
-            # ... (Reuse loading logic or extract to helper if preferred, strictly copying for safety now)
-            user_upload_dir = os.path.join(UPLOAD_DIR, current_user.id)
-            assistant_files = []
-            if os.path.exists(user_upload_dir):
-                for file in os.listdir(user_upload_dir):
-                    if file.startswith(f"{request.assistant_id}_"):
-                        assistant_files.append(os.path.join(user_upload_dir, file))
+            # Get access to the shared vector store (connected to Atlas)
+            vector_store = vector_store_manager.get_vector_store()
             
-            if not assistant_files:
-                raise HTTPException(400, "Assistant files not found")
-                
-            documents = []
-            for file_path in assistant_files:
-                file_ext = os.path.splitext(file_path)[1].lower()
-                try:
-                    if file_ext == '.csv':
-                        docs = DataLoader.load_from_csv(file_path)
-                    elif file_ext == '.json':
-                        docs = DataLoader.load_from_json(file_path)
-                    documents.extend(docs)
-                except Exception:
-                    continue
-            
-            if not documents:
-                raise HTTPException(400, "Failed to load assistant documents")
-                
-            vector_store = vector_store_manager.create_vector_store(documents)
             system_instructions = assistant_engine._build_system_instructions(
                 custom_instructions=assistant_db.custom_instructions,
                 enable_statistics=assistant_db.enable_statistics,
@@ -468,7 +416,7 @@ async def chat_stream(
                 "name": assistant_db.name,
                 "vector_store": vector_store,
                 "system_instructions": system_instructions,
-                "documents_count": len(documents),
+                "documents_count": assistant_db.documents_count,
                 "created_at": assistant_db.created_at
             }
         
