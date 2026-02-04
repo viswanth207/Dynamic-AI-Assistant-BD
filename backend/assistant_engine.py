@@ -86,10 +86,15 @@ class AssistantEngine:
             is_comparison = any(word in user_message.lower() for word in ['highest', 'lowest', 'best', 'worst', 'maximum', 'minimum', 'most', 'least', 'compare', 'all', 'which'])
             k_docs = 30 if is_comparison else 8
             
+            # Filter by assistant_id to prevent data leakage between assistants
+            assistant_id = assistant_config.get("assistant_id")
+            search_filter = {"assistant_id": {"$eq": assistant_id}} if assistant_id else None
+            
             relevant_docs = self.vector_store_manager.similarity_search(
                 vector_store=vector_store,
                 query=user_message,
-                k=k_docs
+                k=k_docs,
+                filter=search_filter
             )
             
             if not relevant_docs:
@@ -137,10 +142,15 @@ class AssistantEngine:
             is_comparison = any(word in user_message.lower() for word in ['highest', 'lowest', 'best', 'worst', 'maximum', 'minimum', 'most', 'least', 'compare', 'all', 'which'])
             k_docs = 30 if is_comparison else 8
             
+            # Filter by assistant_id to prevent data leakage
+            assistant_id = assistant_config.get("assistant_id")
+            search_filter = {"assistant_id": {"$eq": assistant_id}} if assistant_id else None
+            
             relevant_docs = self.vector_store_manager.similarity_search(
                 vector_store=vector_store,
                 query=user_message,
-                k=k_docs
+                k=k_docs,
+                filter=search_filter
             )
             
             if not relevant_docs:
