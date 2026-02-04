@@ -110,13 +110,27 @@ class AssistantEngine:
             import json
             
             # First, send metadata about sources
-            sources_info = [
-                {
-                    "content": doc.page_content[:200] + "...",
-                    "metadata": doc.metadata
+            # First, send metadata about sources
+            sources_info = []
+            for doc in relevant_docs:
+                # Sanitize metadata to avoid sending large internal paths or objects
+                safe_metadata = {
+                    k: v for k, v in doc.metadata.items() 
+                    if k in ['page', 'row_number', 'item_number', 'title', 'heading', 'url']
                 }
-                for doc in relevant_docs
-            ]
+                # Handle source specifically - remove temp paths
+                if 'source' in doc.metadata:
+                    src = str(doc.metadata['source'])
+                    if '/tmp' not in src and '\\tmp' not in src:
+                        safe_metadata['source'] = src
+                    else:
+                        safe_metadata['source'] = "Uploaded File"
+
+                sources_info.append({
+                    "content": doc.page_content[:150] + "...", # Reduce preview size
+                    "metadata": safe_metadata
+                })
+
             yield json.dumps({"type": "sources", "data": sources_info}) + "\n"
             
             # Then stream the content
