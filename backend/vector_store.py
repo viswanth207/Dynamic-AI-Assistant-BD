@@ -65,19 +65,20 @@ class VectorStoreManager:
         self, 
         vector_store: MongoDBAtlasVectorSearch,  # Type hint updated
         query: str, 
-        k: int = 4
+        k: int = 4,
+        filter: Optional[dict] = None
     ) -> List[Document]:
         try:
-            # Note: vector_store object might be reconstructed, 
-            # so we ensure we look at the right place.
-            # Actually, we don't need to pass 'vector_store' object around as much 
-            # because the state is in DB. But to keep API consistent for now:
+            logger.info(f"Performing similarity search for: {query[:50]}... Filter: {filter}")
             
-            logger.info(f"Performing similarity search for: {query[:50]}...")
+            # MongoDB Atlas uses 'pre_filter' argument for metadata filtering
+            # The filter format should be MQL (MongoDB Query Language)
+            # e.g. {"assistant_id": {"$eq": "123"}}
             
             results = vector_store.similarity_search(
                 query=query,
-                k=k
+                k=k,
+                pre_filter=filter
             )
             
             logger.info(f"Found {len(results)} relevant documents")
