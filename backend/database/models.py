@@ -69,10 +69,10 @@ class AssistantInDB(BaseModel):
     enable_alerts: bool = False
     enable_recommendations: bool = False
     documents_count: int
-    vector_store_path: str
     attributes: List[str] = []
     sample_questions: List[str] = []
     graph_data: Dict[str, Any] = {}
+    dataset_summary: Optional[str] = None
     created_at: datetime
 
     class Config:

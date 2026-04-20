@@ -209,7 +209,8 @@ class AssistantEngine:
         custom_instructions: str,
         enable_statistics: bool,
         enable_alerts: bool,
-        enable_recommendations: bool
+        enable_recommendations: bool,
+        dataset_summary: str = None
     ) -> str:
         
         instructions = [custom_instructions]
@@ -246,7 +247,13 @@ class AssistantEngine:
                 "analyze similar cases in the data and provide reasoned predictions. "
                 "Always explain your reasoning and which data patterns support your prediction."
             )
-        
+        if dataset_summary:
+            instructions.append(
+                f"\n--- GLOBAL DATASET SUMMARY (HARD METRICS) ---\n"
+                f"Use the following exact numbers whenever asked global dataset questions (counts, totals, highest/lowest general averages) instead of counting manually:\n"
+                f"{dataset_summary}"
+            )
+            
         return "\n".join(instructions)
     
     def _build_context(self, documents: List[Document]) -> str:

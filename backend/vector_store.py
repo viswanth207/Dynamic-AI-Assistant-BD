@@ -1,8 +1,7 @@
 from typing import List, Optional
 from langchain_core.documents import Document
-from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from pymongo import MongoClient
 import logging
 import os
 
@@ -27,32 +26,27 @@ class VectorStoreManager:
             encode_kwargs={'normalize_embeddings': True}
         )
         
-        # Initialize MongoDB Client for Vector Search
-        self.mongo_uri = os.getenv("MONGODB_URL")
-        self.db_name = "dynamic_assistant_db"
-        self.collection_name = "embeddings"
-        self.client = MongoClient(self.mongo_uri)
-        self.collection = self.client[self.db_name][self.collection_name]
+        self.index_base_dir = "vector_stores"
+        os.makedirs(self.index_base_dir, exist_ok=True)
         
-        logger.info("Vector Store Manager initialized with MongoDB Atlas")
+        logger.info("Vector Store Manager initialized with local FAISS (multi-tenant)")
     
-    def create_vector_store(self, documents: List[Document]) -> MongoDBAtlasVectorSearch:
+    def create_vector_store(self, documents: List[Document]) -> FAISS:
         if not documents:
             raise ValueError("Cannot create vector store with empty documents")
         
+        assistant_id = documents[0].metadata.get("assistant_id", "default")
+        index_path = os.path.join(self.index_base_dir, assistant_id)
+        
         try:
-            logger.info(f"Adding {len(documents)} documents to MongoDB Atlas Vector Store...")
+            logger.info(f"Adding {len(documents)} documents to FAISS Vector Store {index_path}...")
             
-            # MongoDB Atlas Vector Search handles batching internally, 
-            # but we can do it explicitly if needed. 
-            # For now, we trust the library but we might need to batch if 10k explodes.
-            
-            vector_store = MongoDBAtlasVectorSearch.from_documents(
+            vector_store = FAISS.from_documents(
                 documents=documents,
-                embedding=self.embeddings,
-                collection=self.collection,
-                index_name="vector_index" 
+                embedding=self.embeddings
             )
+                
+            vector_store.save_local(index_path)
             
             logger.info("Documents added to Vector Store successfully")
             return vector_store
@@ -63,22 +57,18 @@ class VectorStoreManager:
     
     def similarity_search(
         self, 
-        vector_store: MongoDBAtlasVectorSearch,  # Type hint updated
+        vector_store: FAISS,
         query: str, 
         k: int = 4,
         filter: Optional[dict] = None
     ) -> List[Document]:
         try:
-            logger.info(f"Performing similarity search for: {query[:50]}... Filter: {filter}")
-            
-            # MongoDB Atlas uses 'pre_filter' argument for metadata filtering
-            # The filter format should be MQL (MongoDB Query Language)
-            # e.g. {"assistant_id": {"$eq": "123"}}
+            logger.info(f"Performing similarity search for: {query[:50]}... Filter bypassed due to directory isolation")
             
             results = vector_store.similarity_search(
                 query=query,
                 k=k,
-                pre_filter=filter
+                fetch_k=10000
             )
             
             logger.info(f"Found {len(results)} relevant documents")
@@ -90,7 +80,7 @@ class VectorStoreManager:
     
     def similarity_search_with_score(
         self, 
-        vector_store: MongoDBAtlasVectorSearch, 
+        vector_store: FAISS, 
         query: str, 
         k: int = 4
     ) -> List[tuple[Document, float]]:
@@ -99,7 +89,8 @@ class VectorStoreManager:
             
             results = vector_store.similarity_search_with_score(
                 query=query,
-                k=k
+                k=k,
+                fetch_k=10000
             )
             
             logger.info(f"Found {len(results)} relevant documents with scores")
@@ -109,13 +100,11 @@ class VectorStoreManager:
             logger.error(f"Error during similarity search: {str(e)}")
             return []
 
-    # No longer needed: save_vector_store, load_vector_store 
-    # (Because DB is the storage)
-
-    def get_vector_store(self):
-        """Helper to get an existing vector store object connected to DB"""
-        return MongoDBAtlasVectorSearch(
-            collection=self.collection,
-            embedding=self.embeddings,
-            index_name="vector_index"
-        )
+    def get_vector_store(self, assistant_id: str):
+        """Helper to get an existing vector store object"""
+        index_path = os.path.join(self.index_base_dir, assistant_id)
+        if os.path.exists(index_path):
+            return FAISS.load_local(index_path, self.embeddings, allow_dangerous_deserialization=True)
+        else:
+            doc = Document(page_content="initialization", metadata={"assistant_id": assistant_id})
+            return FAISS.from_documents([doc], self.embeddings)

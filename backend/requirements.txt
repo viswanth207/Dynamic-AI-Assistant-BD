@@ -16,11 +16,11 @@ faiss-cpu==1.10.0
 sentence-transformers==2.3.1
 
 # Data processing
-pandas==2.2.0
-numpy==1.26.3
+pandas>=2.2.0
+numpy>=1.26.3
 requests==2.32.5
 beautifulsoup4==4.12.3
-lxml==5.1.0
+lxml>=5.1.0
 
 # Environment management
 python-dotenv==1.0.1

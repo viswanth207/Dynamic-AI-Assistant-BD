@@ -33,7 +33,7 @@ from backend.auth.dependencies import get_current_user
 from backend.routes import auth
 from backend.database.models import UserInDB
 
-load_dotenv()
+load_dotenv(override=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,13 +61,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
-        "http://3.80.23.96:8000",
-        "https://rag.neuraltrixai.app",
-        "https://dynamic-ai-assistant-bd.onrender.com",
-        "https://vercel.app",
-        "https://data-mind-theta.vercel.app"
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173"
     ],
-    allow_origin_regex="https://.*\\.vercel\\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -224,7 +220,7 @@ async def create_assistant(
         attributes = []
         if documents:
             # Get keys from the first few documents' metadata, excluding internal keys
-            exclude_keys = {'source', 'row_number', 'item_number', 'chunk', 'type', 'title', 'heading'}
+            exclude_keys = {'source', 'row_number', 'item_number', 'chunk', 'type', 'title', 'heading', 'assistant_id', 'user_id'}
             all_keys = set()
             for doc in documents[:5]:
                 all_keys.update(doc.metadata.keys())
@@ -260,6 +256,13 @@ async def create_assistant(
         # The vector store will be built in background.
         
         graph_data = DataLoader.generate_graph_insights(file_path, data_source_type)
+        
+        # Extract global dataset summary if available to hardcode into LLM instructions
+        dataset_summary = None
+        for d in documents:
+            if d.metadata.get("type") == "global_summary":
+                dataset_summary = d.page_content
+                break
 
         assistant_data = {
             "user_id": current_user.id,
@@ -276,6 +279,7 @@ async def create_assistant(
             "attributes": attributes,
             "sample_questions": sample_questions,
             "graph_data": graph_data,
+            "dataset_summary": dataset_summary,
             "created_at": datetime.utcnow().isoformat()
         }
         await crud.create_assistant(assistant_data)
@@ -362,14 +366,14 @@ async def chat_with_assistant(
             # and rebuild the index in memory anymore! We just connect to it.
             
             # Get access to the shared vector store (connected to Atlas)
-            vector_store = vector_store_manager.get_vector_store()
+            vector_store = vector_store_manager.get_vector_store(request.assistant_id)
             
-            # Build system instructions
             system_instructions = assistant_engine._build_system_instructions(
                 custom_instructions=assistant_db.custom_instructions,
                 enable_statistics=assistant_db.enable_statistics,
                 enable_alerts=assistant_db.enable_alerts,
-                enable_recommendations=assistant_db.enable_recommendations
+                enable_recommendations=assistant_db.enable_recommendations,
+                dataset_summary=getattr(assistant_db, 'dataset_summary', None)
             )
             
             # Restore assistant config
@@ -383,6 +387,8 @@ async def chat_with_assistant(
                 "enable_statistics": assistant_db.enable_statistics,
                 "enable_alerts": assistant_db.enable_alerts,
                 "enable_recommendations": assistant_db.enable_recommendations,
+                "attributes": getattr(assistant_db, 'attributes', []),
+                "data_source_type": assistant_db.data_source_type,
                 "created_at": assistant_db.created_at
             }
             
@@ -440,13 +446,14 @@ async def chat_stream(
         # Load assistant config if not in memory
         if request.assistant_id not in assistants_store:
             # Get access to the shared vector store (connected to Atlas)
-            vector_store = vector_store_manager.get_vector_store()
+            vector_store = vector_store_manager.get_vector_store(request.assistant_id)
             
             system_instructions = assistant_engine._build_system_instructions(
                 custom_instructions=assistant_db.custom_instructions,
                 enable_statistics=assistant_db.enable_statistics,
                 enable_alerts=assistant_db.enable_alerts,
-                enable_recommendations=assistant_db.enable_recommendations
+                enable_recommendations=assistant_db.enable_recommendations,
+                dataset_summary=getattr(assistant_db, 'dataset_summary', None)
             )
             
             assistants_store[request.assistant_id] = {
@@ -455,6 +462,8 @@ async def chat_stream(
                 "vector_store": vector_store,
                 "system_instructions": system_instructions,
                 "documents_count": assistant_db.documents_count,
+                "attributes": getattr(assistant_db, 'attributes', []),
+                "data_source_type": assistant_db.data_source_type,
                 "created_at": assistant_db.created_at
             }
         
@@ -610,6 +619,12 @@ async def delete_assistant(
             for file in os.listdir(user_upload_dir):
                 if file.startswith(assistant_id):
                     os.remove(os.path.join(user_upload_dir, file))
+        
+        # Clean up local FAISS vector store directory
+        vector_store_dir = os.path.join("vector_stores", assistant_id)
+        if os.path.exists(vector_store_dir):
+            import shutil
+            shutil.rmtree(vector_store_dir)
         
         logger.info(f"Assistant deleted: {assistant_id}")
         

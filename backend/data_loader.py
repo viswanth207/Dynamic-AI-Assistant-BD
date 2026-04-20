@@ -88,10 +88,45 @@ class DataLoader:
         return graph_data
 
     @staticmethod
+    def _generate_tabular_summary(df: pd.DataFrame, source: str) -> Document:
+        summary_parts = ["GLOBAL DATASET STATISTICAL SUMMARY (EXACT AGGREGATIONS):"]
+        summary_parts.append(f"Total entries (rows): {len(df)}")
+        
+        # Categorical value counts (limit to 20 columns to avoid token overflow)
+        cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()[:20]
+        for col in cat_cols:
+            # Drop NaN to avoid empty key counts, and convert to dict
+            counts = df[col].dropna().value_counts()
+            if len(counts) > 0 and len(counts) <= 100: # Limit unique categories
+                count_str = ", ".join([f"{k}: {v}" for k, v in list(counts.items())[:100]])
+                summary_parts.append(f"Exact count of occurrences for each value in column '{col}': {count_str}")
+        
+        # Numerical aggregations (limit to 30 columns)
+        num_cols = df.select_dtypes(include=['number']).columns.tolist()[:30]
+        for col in num_cols:
+            if not df[col].isna().all():
+                summary_parts.append(f"Metrics for column '{col}': Minimum: {df[col].min()}, Maximum: {df[col].max()}, Average: {df[col].mean():.2f}, Total Sum: {df[col].sum():.2f}")
+            
+        final_summary = "\n".join(summary_parts)
+        # Fallback safeguard: truncate to ~12000 chars explicitly so Groq 8k token limit isn't blown
+        if len(final_summary) > 12000:
+            final_summary = final_summary[:11900] + "\n...[TRUNCATED DUE TO SIZE]..."
+            
+        return Document(
+            page_content=final_summary,
+            metadata={"source": source, "type": "global_summary", "row_number": -1}
+        )
+
+    @staticmethod
     def load_from_csv(file_path: str) -> List[Document]:
         try:
             df = pd.read_csv(file_path)
             documents = []
+            
+            # --- GENERATE SUMMARY DOCUMENT ---
+            summary_doc = DataLoader._generate_tabular_summary(df, file_path)
+            documents.append(summary_doc)
+            # -------------------------------
             
             for idx, row in df.iterrows():
                 content_parts = []
@@ -126,6 +161,14 @@ class DataLoader:
             documents = []
             
             if isinstance(data, list):
+                # --- GENERATE SUMMARY DOCUMENT ---
+                try:
+                    df = pd.DataFrame(data)
+                    if not df.empty:
+                        documents.append(DataLoader._generate_tabular_summary(df, file_path))
+                except Exception as e:
+                    logger.warning(f"Failed to generate JSON summary: {e}")
+                # -------------------------------
                 for idx, item in enumerate(data):
                     content = DataLoader._dict_to_content(item)
                     doc = Document(
@@ -175,6 +218,14 @@ class DataLoader:
                     documents = []
                     
                     if isinstance(data, list):
+                        # --- GENERATE SUMMARY DOCUMENT ---
+                        try:
+                            df = pd.DataFrame(data)
+                            if not df.empty:
+                                documents.append(DataLoader._generate_tabular_summary(df, url))
+                        except Exception as e:
+                            logger.warning(f"Failed to generate JSON summary: {e}")
+                        # -------------------------------
                         for idx, item in enumerate(data):
                             content = DataLoader._dict_to_content(item)
                             doc = Document(
@@ -203,6 +254,14 @@ class DataLoader:
                 from io import StringIO
                 df = pd.read_csv(StringIO(response.text))
                 documents = []
+                
+                # --- GENERATE SUMMARY DOCUMENT ---
+                try:
+                    summary_doc = DataLoader._generate_tabular_summary(df, url)
+                    documents.append(summary_doc)
+                except Exception as e:
+                    logger.warning(f"Failed to generate CSV summary: {e}")
+                # -------------------------------
                 
                 for idx, row in df.iterrows():
                     content_parts = []
